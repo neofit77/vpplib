@@ -96,7 +96,7 @@ class crl():
         states = np.stack(batch[:,0])
         actions = np.stack(batch[:,1])
         rewards = np.stack(batch[:,2])
-        targets = actor.actor_target.predict(states)
+        targets = self.actor_target.predict(states)
         for target, action, reward in zip(targets, actions, rewards):
             target[action] = reward
         self.actor_unperturbed.fit(np.squeeze(states), np.squeeze(targets), verbose = 0)
