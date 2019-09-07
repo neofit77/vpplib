@@ -151,7 +151,7 @@ class crl():
         plt.close()
         if LOGFILE:
             xls = pd.DataFrame(log)
-            xls.to_excel("results_log_ddpg.xls")
+            xls.to_excel("results_log.xls")
 
 actor = crl()
 actor.load_weights(WEIGHTS_PATH)
