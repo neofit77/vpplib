@@ -145,7 +145,7 @@ class ems(gym.Env):
         
         """
         self.rand_start = int(np.random.rand()*25000)+self.offset
-        state = np.array(np.zeros(self.obs))
+        state = np.zeros(self.obs)
         self.time = self.rand_start
         self.residual = 0       
         self.cum_r = 0
