@@ -4,20 +4,25 @@ Created on Thu Sep  5 17:43:44 2019
 
 @author: patri
 """
+import random
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import tensorflow as tf
-import keras.backend as K
-from keras.initializers import RandomUniform
-from keras.models import Model
-from keras.layers import Input, Dense, Reshape, LSTM, Lambda, BatchNormalization, GaussianNoise, Flatten
-from keras_layer_normalization import LayerNormalization
-from keras.optimizers import Adam, SGD
 from collections import deque
 from tqdm import tqdm
-import random
 import VPPGym as ems_env
+import tensorflow as tf
+import keras.backend as K
+from keras.models import Model
+from keras.layers import Input, Dense, Lambda, GaussianNoise
+from keras_layer_normalization import LayerNormalization
+from keras.optimizers import SGD
+
+PRINT_EVERY_X_ITER = 5
+EPISODES = 5000
+EP_LEN = 480
+BATCH_SIZE = 480
+WEIGHTS_PATH = None
 
 class crl():
     
@@ -113,16 +118,17 @@ class crl():
     def change_std(self, std):
         K.set_value(self.std_var, std)
         
-    def update_actor_target(self): #NOT IN USE
+    def update_actor_target(self): 
+        #NOT IN USE
         weights = self.actor_perturbed.get_weights()
         self.actor_target.set_weights(weights)
     
     def soft_update_actor_target(self):
-        W, target_W = self.actor_unperturbed.get_weights(), self.actor_target.get_weights()        
-        for i, weight in enumerate(W):
-            target_W[i] = weight * self.tau + target_W[i] * (1 - self.tau) 
-        self.actor_target.set_weights(target_W)
-        
+        weights, target_weights = self.actor_unperturbed.get_weights(), self.actor_target.get_weights()        
+        for i, weight in enumerate(weights):
+            target_weights[i] = weight * self.tau + target_weights[i] * (1 - self.tau) 
+        self.actor_target.set_weights(target_weights)
+    
     def plot_test(self, LOGFILE = False):
         test_env = ems_env.ems(EP_LEN)      
         state = test_env.reset()
@@ -147,16 +153,9 @@ class crl():
             xls = pd.DataFrame(log)
             xls.to_excel("results_log_ddpg.xls")
 
-PRINT_EVERY_X_ITER = 5
-EPISODES = 5000
-EP_LEN = 480
-BATCH_SIZE = 480
-WEIGHTS_PATH = None
-
 actor = crl()
 actor.load_weights(WEIGHTS_PATH)
 env = ems_env.ems(EP_LEN)
-
 cumul_r = 0
 for ep in tqdm(range(EPISODES)):
     done = False
@@ -175,7 +174,7 @@ for ep in tqdm(range(EPISODES)):
             actor.train(batch)
             actor.soft_update_actor_target()
     tqdm.write(f"--------------------------\n Episode: {ep+1}/{EPISODES} \n Cumulative Reward: {cumul_r} \n Episodic Reward: {ep_r}\n Current Std: {actor.std}")
-    if not ep % PRINT_EVERY_X_ITER:
+    if not (ep+1) % PRINT_EVERY_X_ITER:
         actor.plot_test()
     
     
