@@ -169,10 +169,9 @@ for ep in tqdm(range(EPISODES)):
         cumul_r += r
         ep_r += r
         actor.memory.append([prior_state, a , r])        
-        if len(actor.memory) > BATCH_SIZE:
-            batch = np.array(random.sample(actor.memory, BATCH_SIZE))    
-            actor.train(batch)
-            actor.soft_update_actor_target()
+        batch = np.array(random.sample(actor.memory, min(BATCH_SIZE, len(actor.memory))))
+        actor.train(batch)
+        actor.soft_update_actor_target()
     tqdm.write(f"--------------------------\n Episode: {ep+1}/{EPISODES} \n Cumulative Reward: {cumul_r} \n Episodic Reward: {ep_r}\n Current Std: {actor.std}")
     if not (ep+1) % PRINT_EVERY_X_ITER:
         actor.plot_test()
