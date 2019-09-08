@@ -107,7 +107,7 @@ class crl():
             x = LayerNormalization()(x)
         out = Dense(self.actions, activation = 'tanh')(x)
         M = Model(inp, out)
-        M.compile(optimizer = SGD(self.learning_rate, momentum = 0.9), loss = "categorical_crossentropy")
+#        M.compile(optimizer = SGD(self.learning_rate, momentum = 0.9), loss = "categorical_crossentropy")
         return M
 
     def network_unperturbed(self):
@@ -119,7 +119,7 @@ class crl():
             x = LayerNormalization()(x)
         out = Dense(self.actions, activation = 'tanh')(x)
         M = Model(inp, out)
-        M.compile(optimizer = SGD(self.learning_rate, momentum = 0.9), loss = "categorical_crossentropy")
+#        M.compile(optimizer = SGD(self.learning_rate, momentum = 0.9), loss = "categorical_crossentropy")
         return M
     
     def actor_train(self):
@@ -128,28 +128,28 @@ class crl():
         grads = zip(params_grad, self.actor_unperturbed.trainable_weights)
         return K.function([self.actor_unperturbed.input, action_gdts], [tf.train.AdamOptimizer(self.learning_rate).apply_gradients(grads)][1:])
     
-    def calc_action(self, state):
-        ### source: flyyufelix ###
-        z = self.actor_perturbed.predict(state)
-        z_concat = np.vstack(z)
-        q = np.sum(np.multiply(z_concat, np.array(self.z)), axis=1) 
-        action_idx = np.argmax(q)        
-        return action_idx
-    
-    def calc_unperturbed_action(self, state):
-        ### source: flyyufelix ###
-        z = self.actor_unperturbed.predict(state)
-        z_concat = np.vstack(z)
-        q = np.sum(np.multiply(z_concat, np.array(self.z)), axis=1) 
-        action_idx = np.argmax(q)       
-        return action_idx    
+#    def calc_action(self, state):
+#        ### source: flyyufelix ###
+#        z = self.actor_perturbed.predict(state)
+#        z_concat = np.vstack(z)
+#        q = np.sum(np.multiply(z_concat, np.array(self.z)), axis=1) 
+#        action_idx = np.argmax(q)        
+#        return action_idx
+#    
+#    def calc_unperturbed_action(self, state):
+#        ### source: flyyufelix ###
+#        z = self.actor_unperturbed.predict(state)
+#        z_concat = np.vstack(z)
+#        q = np.sum(np.multiply(z_concat, np.array(self.z)), axis=1) 
+#        action_idx = np.argmax(q)       
+#        return action_idx    
     
     def train(self, batch):
         states = np.stack(batch[:,0])
         actions = np.stack(batch[:,1])
         rewards = np.stack(batch[:,2])
         m_prob = [np.zeros((batch.shape[0], self.atoms)) for i in range(self.actions)]
-        for i, (action, reward) in enumerate(zip(actions, rewards)):
+        for i, reward in enumerate(rewards):
             for j in range(self.actions):
                 Tz = min(self.r_max, max(self.r_min, reward))
                 bj = (Tz - self.r_min) / self.delta_r 
@@ -169,11 +169,11 @@ class crl():
         self.std_log = np.sqrt(np.mean(np.square(au - ap)))
         self.calc_adaptive_noise(self.std_log)
         
-    def calc_action_list(self, z):
-        z_concat = np.vstack(z)
-        q = np.sum(np.multiply(z_concat, np.array(self.z)), axis=1) 
-        q = q.reshape((batch.shape[0], self.actions), order='F')
-        return np.argmax(q, axis=1)
+#    def calc_action_list(self, z):
+#        z_concat = np.vstack(z)
+#        q = np.sum(np.multiply(z_concat, np.array(self.z)), axis=1) 
+#        q = q.reshape((batch.shape[0], self.actions), order='F')
+#        return np.argmax(q, axis=1)
     
     def calc_adaptive_noise(self, std):
         if std > self.target_std: self.std /= 1.01
@@ -188,6 +188,12 @@ class crl():
         for i, weight in enumerate(weights):
             target_weights[i] = weight * self.tau + target_weights[i] * (1 - self.tau) 
         self.actor_target.set_weights(target_weights)
+    
+    def soft_update_critic_target(self):
+        weights, target_weights = self.critic.get_weights(), self.critic_target.get_weights()        
+        for i, weight in enumerate(weights):
+            target_weights[i] = weight * self.tau + target_weights[i] * (1 - self.tau) 
+        self.critic_target.set_weights(target_weights)
         
     def epsilon_greedy(self, action):
         if np.random.random() < self.epsilon:
@@ -244,6 +250,7 @@ if __name__ == "__main__":
             batch = np.array(random.sample(agent.memory, min(BATCH_SIZE, len(agent.memory))))    
             agent.train(batch)
             agent.soft_update_actor_target()
+            agent.soft_update_critic_target()
         tqdm.write(f"\n--------------------------\n Episode: {ep+1}/{EPISODES} \n Epsilon: {np.round(agent.epsilon, 2)} \n Cumulative Reward: {cumul_r} \n Episodic Reward: {ep_r}\n Current Std: {agent.std}")
         if not (ep+1) % PRINT_EVERY_X_ITER:
             agent.plot_test()

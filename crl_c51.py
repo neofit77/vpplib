@@ -124,11 +124,10 @@ class crl():
         return action_idx    
     
     def train(self, batch):
-        num_samples = len(batch)
         states = np.stack(batch[:,0])
         actions = np.stack(batch[:,1])
         rewards = np.stack(batch[:,2])
-        m_prob = [np.zeros((num_samples, self.atoms)) for i in range(self.actions)]
+        m_prob = [np.zeros((batch.shape[0], self.atoms)) for i in range(self.actions)]
         for i, (action, reward) in enumerate(zip(actions, rewards)):
             Tz = min(self.r_max, max(self.r_min, reward))
             bj = (Tz - self.r_min) / self.delta_r 
