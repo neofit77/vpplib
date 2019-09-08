@@ -15,14 +15,14 @@ import VPPGym_continuous as ems_env
 import tensorflow as tf
 import keras.backend as K
 from keras.models import Model
-from keras.layers import Input, Dense, GaussianNoise, concatenate, Flatten
+from keras.layers import Input, Dense, GaussianNoise, concatenate
 from keras_layer_normalization import LayerNormalization
 from keras.optimizers import SGD
 
 PRINT_EVERY_X_ITER = 1
 EPISODES = 5000
-EP_LEN = 32
-BATCH_SIZE = 16
+EP_LEN = 480
+BATCH_SIZE = 480
 WEIGHTS_PATH = None
 
 """
@@ -62,7 +62,8 @@ class crl():
         self.std_var = K.variable(value = self.std)
         self.actor_perturbed = self.network_perturbed()
         self.actor_unperturbed = self.network_unperturbed()
-        self.actor_target = self.network_unperturbed()
+        self.actor_optimizer = self.actor_train()
+#        self.actor_target = self.network_unperturbed()
         self.critic = self.network_critic()
         self.critic_target = self.network_critic() 
         self.memory = deque(maxlen=20000)
@@ -71,14 +72,14 @@ class crl():
         self.SAVE_HIGHSCORE = False
         self.high_score = 0
         self.action_grads = K.function([self.critic.input[0], self.critic.input[1]], K.gradients(self.critic.output, [self.critic.input[1]]))
-              
+#        self.actor_train_fn = K.function(state_inputs, [self.actor(state_inputs)])      
     def load_weights(self, name):
         if name == None: return print("No weights loaded")
-        try: self.actor_target.load_weights(name)
+        try: self.actor_unperturbed.load_weights(name)
         except: print("Loading weights caused an error!")
-        self.best_weights = self.actor_target.get_weights()
+        self.best_weights = self.actor_unperturbed.get_weights()
         self.actor_perturbed.set_weights(self.best_weights)
-        self.actor_unperturbed.set_weights(self.best_weights)
+#        self.actor_unperturbed.set_weights(self.best_weights)
     
     def network_critic(self):
         out = []
@@ -124,7 +125,7 @@ class crl():
     
     def actor_train(self):
         action_gdts = K.placeholder(shape=(None, self.actions))
-        params_grad = tf.gradients(self.actor_unperturbed.output, self.actor_unperturbed.trainable_weights, - action_gdts)
+        params_grad = tf.gradients(self.actor_unperturbed.output, self.actor_unperturbed.trainable_weights, -action_gdts)
         grads = zip(params_grad, self.actor_unperturbed.trainable_weights)
         return K.function([self.actor_unperturbed.input, action_gdts], [tf.train.AdamOptimizer(self.learning_rate).apply_gradients(grads)][1:])
     
@@ -157,8 +158,8 @@ class crl():
                 m_prob[j][i][int(m_l)] += (m_u - bj)
                 m_prob[j][i][int(m_u)] += (bj - m_l)
         self.critic.fit([states, actions], m_prob, verbose = 0)
-        self.action_grads([states, actions])
-        self.actor_train()
+        grads = self.action_grads([states, actions])
+        self.actor_optimizer([states, np.array(grads).reshape((-1, self.actions))])
         weights = self.actor_unperturbed.get_weights()
         self.actor_perturbed.set_weights(weights)
         self.update_std(np.array(states))  
@@ -183,11 +184,11 @@ class crl():
     def change_std(self, std):
         K.set_value(self.std_var, std)
     
-    def soft_update_actor_target(self):
-        weights, target_weights = self.actor_unperturbed.get_weights(), self.actor_target.get_weights()        
-        for i, weight in enumerate(weights):
-            target_weights[i] = weight * self.tau + target_weights[i] * (1 - self.tau) 
-        self.actor_target.set_weights(target_weights)
+#    def soft_update_actor_target(self):
+#        weights, target_weights = self.actor_unperturbed.get_weights(), self.actor_target.get_weights()        
+#        for i, weight in enumerate(weights):
+#            target_weights[i] = weight * self.tau + target_weights[i] * (1 - self.tau) 
+#        self.actor_target.set_weights(target_weights)
     
     def soft_update_critic_target(self):
         weights, target_weights = self.critic.get_weights(), self.critic_target.get_weights()        
@@ -218,7 +219,7 @@ class crl():
         tqdm.write(f" Current weights achieve a score of {cum_r}")
         if cum_r > self.high_score and self.SAVE_HIGHSCORE:
             self.high_score = cum_r
-            self.actor_target.save_weights(f"high_score_weights_{cum_r}.h5")
+            self.actor_unperturbed.save_weights(f"high_score_weights_{cum_r}.h5")
         pd.DataFrame(soc).plot()
         pd.DataFrame(np.squeeze(self.critic_target.predict([np.expand_dims(state, axis = 0), np.expand_dims(action, axis = 0)]))).T.plot(kind = "bar", subplots = True)
         plt.show()
@@ -249,7 +250,7 @@ if __name__ == "__main__":
             agent.memory.append([prior_state, action, r]) 
             batch = np.array(random.sample(agent.memory, min(BATCH_SIZE, len(agent.memory))))    
             agent.train(batch)
-            agent.soft_update_actor_target()
+#            agent.soft_update_actor_target()
             agent.soft_update_critic_target()
         tqdm.write(f"\n--------------------------\n Episode: {ep+1}/{EPISODES} \n Epsilon: {np.round(agent.epsilon, 2)} \n Cumulative Reward: {cumul_r} \n Episodic Reward: {ep_r}\n Current Std: {agent.std}")
         if not (ep+1) % PRINT_EVERY_X_ITER:
