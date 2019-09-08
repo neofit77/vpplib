@@ -19,7 +19,7 @@ from keras_layer_normalization import LayerNormalization
 from keras.optimizers import SGD
 
 """
-This implementation uses epsilon greedy + parameter noise space as 
+This implementation uses epsilon greedy + parameter space noise as 
 exploration strategy, as I found parameter space noise perfomance to
 dependent from weight initialization!
 """ 
