@@ -80,23 +80,28 @@ class crl():
                 
     def network_perturbed(self):
         inp = Input((self.state_dim))
-        for _ in range(self.layers):
-            x = Dense(self.nodes, activation='relu')(inp)
+        x = Dense(self.nodes, activation='relu')(inp)
+        x = GaussianNoise(self.std_var)(x, training = True)
+        x = LayerNormalization()(x)
+        for _ in range(self.layers - 1):
+            x = Dense(self.nodes, activation='relu')(x)
             x = GaussianNoise(self.std_var)(x, training = True)
             x = LayerNormalization()(x)
-        out = Dense(self.actions, activation='linear')(x)
+        out = (Dense(self.actions, activation='linear')(x))
         M = Model(inp, out)
-        M.compile(optimizer = SGD(self.learning_rate, momentum = 0.9),loss=self.loss)
+        M.compile(optimizer = SGD(self.learning_rate, momentum = 0.9),loss = self.loss)
         return M
 
     def network_unperturbed(self):
         inp = Input((self.state_dim))
-        for _ in range(self.layers):
-            x = Dense(self.nodes, activation='relu')(inp)
+        x = Dense(self.nodes, activation='relu')(inp)
+        x = LayerNormalization()(x)
+        for _ in range(self.layers - 1):
+            x = Dense(self.nodes, activation='relu')(x)
             x = LayerNormalization()(x)
-        out = Dense(self.actions, activation='linear')(x)
+        out = (Dense(self.actions, activation='linear')(x))
         M = Model(inp, out)
-        M.compile(optimizer = SGD(self.learning_rate, momentum = 0.9),loss=self.loss)
+        M.compile(optimizer = SGD(self.learning_rate, momentum = 0.9),loss = self.loss)
         return M
     
     def train(self, batch):
@@ -163,28 +168,27 @@ class crl():
             xls = pd.DataFrame(log)
             xls.to_excel("results_log.xls")
 
-actor = crl()
-actor.load_weights(WEIGHTS_PATH)
-env = ems_env.ems(EP_LEN)
-cumul_r = 0
-for ep in tqdm(range(EPISODES)):
-    done = False
-    ep_r = 0
-    state = env.reset()
-    while not done:
-        prior_state = state      
-        action_output = actor.actor_perturbed.predict(np.expand_dims(state, axis = 0))
-        action = actor.epsilon_greedy(np.argmax(action_output))
-        state, reward, done, _ = env.step(action)        
-        cumul_r += reward
-        ep_r += reward
-        actor.memory.append([prior_state, action , reward])
-        if len(actor.memory) > 1:
-            batch = np.array(random.sample(actor.memory, min(BATCH_SIZE, len(actor.memory))))
-            actor.train(batch)
-            actor.soft_update_actor_target()
-    tqdm.write(f"--------------------------\n Epsilon: {actor.epsilon} \n Episode: {ep+1}/{EPISODES} \n Cumulative Reward: {cumul_r} \n Episodic Reward: {ep_r}\n Current Std: {actor.std}")
-    if not (ep+1) % PRINT_EVERY_X_ITER:
-        actor.plot_test()
-    
-    
+if __name__ == "__main__":
+    actor = crl()
+    actor.load_weights(WEIGHTS_PATH)
+    env = ems_env.ems(EP_LEN)
+    cumul_r = 0
+    for ep in tqdm(range(EPISODES)):
+        done = False
+        ep_r = 0
+        state = env.reset()
+        while not done:
+            prior_state = state      
+            action_output = actor.actor_perturbed.predict(np.expand_dims(state, axis = 0))
+            action = actor.epsilon_greedy(np.argmax(action_output))
+            state, reward, done, _ = env.step(action)        
+            cumul_r += reward
+            ep_r += reward
+            actor.memory.append([prior_state, action , reward])
+            if len(actor.memory) > 1:
+                batch = np.array(random.sample(actor.memory, min(BATCH_SIZE, len(actor.memory))))
+                actor.train(batch)
+                actor.soft_update_actor_target()
+        tqdm.write(f"--------------------------\n Episode: {ep+1}/{EPISODES} \n Epsilon: {actor.epsilon} \n Cumulative Reward: {cumul_r} \n Episodic Reward: {ep_r}\n Current Std: {actor.std}")
+        if not (ep+1) % PRINT_EVERY_X_ITER:
+            actor.plot_test()

@@ -124,17 +124,17 @@ class VPPEnergyStorage(VPPComponent):
         """
 
         # Check if power exceeds max power
-        #power = energy / (timebase / 60)
+        power = energy / (timebase / 60)
         is_viable = True
         
-        #if power > self.maxPower * self.maxC:
-         #   energy = (self.maxPower * self.maxC) * (timebase / 60)
+        if power > self.maxPower * self.maxC:
+            energy = (self.maxPower * self.maxC) * (timebase / 60)
 
 
         # Check if charge exceeds capacity
-        #if self.stateOfCharge + energy * self.chargeEfficiency > self.capacity:
-         #   energy = (self.capacity - self.stateOfCharge) * (1 / self.chargeEfficiency)
-          #  is_viable = False
+        if self.stateOfCharge + energy * self.chargeEfficiency > self.capacity:
+            energy = (self.capacity - self.stateOfCharge) * (1 / self.chargeEfficiency)
+            is_viable = False
 
         # Update state of charge
         self.stateOfCharge += energy * self.chargeEfficiency
@@ -186,16 +186,16 @@ class VPPEnergyStorage(VPPComponent):
         """
 
         # Check if power exceeds max power
-        #power = energy / (timebase / 60)
+        power = energy / (timebase / 60)
         is_viable = True
-#        if power > self.maxPower * self.maxC:
-#            energy = (self.capacity - self.stateOfCharge) * (1 / self.chargeEfficiency)
-#
-#
-#        # Check if discharge exceeds state of charge
-#        if self.stateOfCharge - energy * (1 / self.dischargeEfficiency) < 0:
-#            energy = self.stateOfCharge * self.dischargeEfficiency
-#            is_viable = False
+        if power > self.maxPower * self.maxC:
+            energy = (self.capacity - self.stateOfCharge) * (1 / self.chargeEfficiency)
+
+
+        # Check if discharge exceeds state of charge
+        if self.stateOfCharge - energy * (1 / self.dischargeEfficiency) < 0:
+            energy = self.stateOfCharge * self.dischargeEfficiency
+            is_viable = False
 
         # Update state of charge
         self.stateOfCharge -= energy * (1 / self.dischargeEfficiency)
