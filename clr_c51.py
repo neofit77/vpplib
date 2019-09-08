@@ -2,7 +2,7 @@
 """
 Created on Thu Sep  5 17:43:44 2019
 
-@author: patri
+@author: Patrick Lehnen
 """
 import random
 import math
@@ -22,13 +22,16 @@ from keras.optimizers import SGD
 PRINT_EVERY_X_ITER = 5
 EPISODES = 5000
 EP_LEN = 480
-BATCH_SIZE = 96
+BATCH_SIZE = 480
 WEIGHTS_PATH = None
 
 """
 This implementation uses epsilon greedy + parameter space noise as 
 exploration strategy, as I found parameter space noise perfomance to
 dependent from weight initialization!
+
+Beware: if r_max + r_min equals 0, any 0 reward from the environment 
+will not be regarded as (m_u - bj) equals to zero as well!
 """ 
 
 class crl():
@@ -36,13 +39,13 @@ class crl():
     def __init__(self):        
         #C51
         self.atoms = 51 
-        self.r_max = 3
-        self.r_min = -3
+        self.r_max = 2
+        self.r_min = -1.5
         self.delta_r = (self.r_max - self.r_min) / float(self.atoms - 1)
         self.z = [self.r_min + i * self.delta_r for i in range(self.atoms)]
-        self.epsilon = 1
+        self.epsilon = 0.5
         self.epsilon_decay_rate = 0.9995
-        self.epsilon_min = 0.01
+        self.epsilon_min = 0.00
         
         #environment variables
         self.state_size = 3
@@ -54,7 +57,7 @@ class crl():
         self.layers = 2
         self.learning_rate = 0.0001
         self.tau = 0.01
-        self.target_std = 0.2
+        self.target_std = 0.3
         self.std = self.target_std
         self.std_var = K.variable(value = self.std)
         self.actor_perturbed = self.network_perturbed()
@@ -179,7 +182,7 @@ class crl():
             soc.append(state[0])
             cum_r += r
         tqdm.write(f" Current weights achieve a score of {cum_r}")
-        if cum_r > self.high_score and self.SAVE_HIGSCORE:
+        if cum_r > self.high_score and self.SAVE_HIGHSCORE:
             self.high_score = cum_r
             self.actor_target.save_weights(f"high_score_weights_{cum_r}.h5")
         pd.DataFrame(soc).plot()

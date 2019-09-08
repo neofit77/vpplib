@@ -2,7 +2,7 @@
 """
 Created on Thu Sep  5 17:43:44 2019
 
-@author: patri
+@author: Patrick Lehnen
 """
 import random
 import numpy as np
@@ -27,7 +27,7 @@ dependent from weight initialization!
 PRINT_EVERY_X_ITER = 5
 EPISODES = 5000
 EP_LEN = 480
-BATCH_SIZE = 96
+BATCH_SIZE = 480
 WEIGHTS_PATH = None
 
 class crl():
@@ -38,7 +38,7 @@ class crl():
         self.state_dim = (self.state_size,)
         self.actions = 3
         self.action_dim = 1
-        self.epsilon = 1
+        self.epsilon = 0.5
         self.epsilon_decay_rate = 0.9995
         self.epsilon_min = 0.01
         
@@ -183,7 +183,7 @@ for ep in tqdm(range(EPISODES)):
             batch = np.array(random.sample(actor.memory, min(BATCH_SIZE, len(actor.memory))))
             actor.train(batch)
             actor.soft_update_actor_target()
-    tqdm.write(f"--------------------------\n Epsilon: {actor.epsilon] \n Episode: {ep+1}/{EPISODES} \n Cumulative Reward: {cumul_r} \n Episodic Reward: {ep_r}\n Current Std: {actor.std}")
+    tqdm.write(f"--------------------------\n Epsilon: {actor.epsilon} \n Episode: {ep+1}/{EPISODES} \n Cumulative Reward: {cumul_r} \n Episodic Reward: {ep_r}\n Current Std: {actor.std}")
     if not (ep+1) % PRINT_EVERY_X_ITER:
         actor.plot_test()
     
