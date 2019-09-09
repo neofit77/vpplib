@@ -57,12 +57,12 @@ class crl():
         self.layers = 2
         self.learning_rate = 0.01
         self.tau = 0.01
-        self.target_std = 0.3
+        self.target_std = 0.9
         self.std = self.target_std
         self.std_var = K.variable(value = self.std)
         self.actor_perturbed = self.network_perturbed()
         self.actor_unperturbed = self.network_unperturbed()
-        self.actor_optimizer = self.actor_train()
+#        self.actor_optimizer = self.actor_train()
 #        self.actor_target = self.network_unperturbed()
         self.critic = self.network_critic()
         self.critic_target = self.network_critic() 
@@ -71,10 +71,10 @@ class crl():
         #helper
         self.SAVE_HIGHSCORE = False
         self.high_score = 0
-        self.action_grads = K.function([self.critic.input[0], self.critic.input[1]], K.gradients(self.critic.output, [self.critic.input[1]]))
+#        self.action_grads = K.function([self.critic.input[0], self.critic.input[1]], K.gradients(self.critic.output, [self.critic.input[1]]))
 #        self.actor_train_fn = K.function(state_inputs, [self.actor(state_inputs)])      
         self.loss = []
-        self.calculate_gradients = K.function(self.critic.input, K.gradients(self.critic.output, self.critic.input[1]))
+        self.calculate_gradients = K.function(self.critic.input, tf.gradients(self.critic.output, self.critic.input[1], tf.lin_space(self.r_min, self.r_max, self.atoms)))
         self.action_gradients = K.placeholder([None, self.actions])
         self.parameter_gradients = tf.gradients(
                                     self.actor_unperturbed.output, 
@@ -131,11 +131,11 @@ class crl():
 #        M.compile(optimizer = SGD(self.learning_rate, momentum = 0.9), loss = "categorical_crossentropy")
         return M
     
-    def actor_train(self):
-        action_gdts = K.placeholder(shape=(None, self.actions))
-        params_grad = tf.gradients(self.actor_unperturbed.output, self.actor_unperturbed.trainable_weights, -action_gdts)
-        grads = zip(params_grad, self.actor_unperturbed.trainable_weights)
-        return K.function([self.actor_unperturbed.input, action_gdts], [tf.train.AdamOptimizer(self.learning_rate).apply_gradients(grads)][1:])#[1:])
+#    def actor_train(self):
+#        action_gdts = K.placeholder(shape=(None, self.actions))
+#        params_grad = tf.gradients(self.actor_unperturbed.output, self.actor_unperturbed.trainable_weights, -action_gdts)
+#        grads = zip(params_grad, self.actor_unperturbed.trainable_weights)
+#        return K.function([self.actor_unperturbed.input, action_gdts], [tf.train.AdamOptimizer(self.learning_rate).apply_gradients(grads)][1:])#[1:])
     
 #    def calc_action(self, state):
 #        ### source: flyyufelix ###
@@ -194,6 +194,27 @@ class crl():
 #        self.update_std(np.array(states))  
 
     def train(self, batch):
+        states = np.stack(batch[:,0])
+        actions = np.stack(batch[:,1])
+        rewards = np.stack(batch[:,2])
+        m_prob = np.zeros((batch.shape[0], self.atoms))
+        for i, reward in enumerate(rewards):
+            Tz = min(self.r_max, max(self.r_min, reward))
+            bj = (Tz - self.r_min) / self.delta_r 
+            m_l, m_u = math.floor(bj), math.ceil(bj)
+            m_prob[i][int(m_l)] += (m_u - bj)
+            m_prob[i][int(m_u)] += (bj - m_l)
+        hist = self.critic.fit([states, actions], m_prob, verbose = 0)
+        self.loss.append(hist.history["loss"])           
+        new_actions = self.actor_unperturbed.predict(states)
+        grads = self.calculate_gradients([states, new_actions])
+        assert any(np.isnan(grads[0][0])) == False
+        self.optimize([states, grads])  
+        weights = self.actor_unperturbed.get_weights()
+        self.actor_perturbed.set_weights(weights)
+        self.update_std(np.array(states)) 
+        
+    def train2(self, batch):
         states = np.stack(batch[:,0])
         actions = np.stack(batch[:,1])
         rewards = np.stack(batch[:,2])
