@@ -38,11 +38,11 @@ class crl():
     
     def __init__(self):        
         #C51
-#        self.atoms = 51 
-#        self.r_max = 5
-#        self.r_min = -1.5
-#        self.delta_r = (self.r_max - self.r_min) / float(self.atoms - 1)
-#        self.z = [self.r_min + i * self.delta_r for i in range(self.atoms)]
+        self.atoms = 51 
+        self.r_max = 15
+        self.r_min = -1.5
+        self.delta_r = (self.r_max - self.r_min) / float(self.atoms - 1)
+        self.z = [self.r_min + i * self.delta_r for i in range(self.atoms)]
         self.epsilon = 0.5
         self.epsilon_decay_rate = 0.9995
         self.epsilon_min = 0.00
@@ -62,31 +62,34 @@ class crl():
         self.std_var = K.variable(value = self.std)
         self.actor_perturbed = self.network_perturbed()
         self.actor_unperturbed = self.network_unperturbed()
+        self.actor_optimizer = self.actor_train()
 #        self.actor_target = self.network_unperturbed()
         self.critic = self.network_critic()
-#        self.critic_target = self.network_critic() 
+        self.critic_target = self.network_critic() 
         self.memory = deque(maxlen=20000)
         
         #helper
         self.SAVE_HIGHSCORE = False
         self.high_score = 0
+        self.action_grads = K.function([self.critic.input[0], self.critic.input[1]], K.gradients(self.critic.output, [self.critic.input[1]]))
+#        self.actor_train_fn = K.function(state_inputs, [self.actor(state_inputs)])      
         self.loss = []
         self.calculate_gradients = K.function(self.critic.input, K.gradients(self.critic.output, self.critic.input[1]))
         self.action_gradients = K.placeholder([None, self.actions])
         self.parameter_gradients = tf.gradients(
                                     self.actor_unperturbed.output, 
                                     self.actor_unperturbed.trainable_weights, 
-                                    -self.action_gradients)
+                                    -self.action_gradients) #Tätä das ist anders in tf!!! siehe cookbenjamin
         self.gradients = zip(self.parameter_gradients, self.actor_unperturbed.trainable_weights)
         self.optimize = K.function([self.actor_unperturbed.input, self.action_gradients], outputs = [], updates = [tf.train.AdamOptimizer(self.learning_rate).apply_gradients(self.gradients)])
         
     def load_weights(self, name):
         if name == None: return print("No weights loaded")
-        try: self.actor_target.load_weights(name)
+        try: self.actor_unperturbed.load_weights(name)
         except: print("Loading weights caused an error!")
-        self.best_weights = self.actor_target.get_weights()
+        self.best_weights = self.actor_unperturbed.get_weights()
         self.actor_perturbed.set_weights(self.best_weights)
-        self.actor_unperturbed.set_weights(self.best_weights)
+#        self.actor_unperturbed.set_weights(self.best_weights)
     
     def network_critic(self):
         state = Input((self.state_dim))
@@ -97,9 +100,9 @@ class crl():
         for _ in range(self.layers - 1):
             x = Dense(self.nodes, activation='relu')(x)
             x = LayerNormalization()(x)
-        out = Dense(1, activation = 'linear')(x)
+        out = Dense(self.atoms, activation = 'softmax')(x)
         M = Model([state, action], out)
-        M.compile(optimizer = Adam(self.learning_rate), loss = "MSE")
+        M.compile(optimizer = Adam(self.learning_rate), loss = "categorical_crossentropy")
         return M
             
     def network_perturbed(self):
@@ -113,6 +116,7 @@ class crl():
             x = LayerNormalization()(x)
         out = Dense(self.actions, activation = 'tanh')(x)
         M = Model(inp, out)
+#        M.compile(optimizer = SGD(self.learning_rate, momentum = 0.9), loss = "categorical_crossentropy")
         return M
 
     def network_unperturbed(self):
@@ -124,13 +128,83 @@ class crl():
             x = LayerNormalization()(x)
         out = Dense(self.actions, activation = 'tanh')(x)
         M = Model(inp, out)
+#        M.compile(optimizer = SGD(self.learning_rate, momentum = 0.9), loss = "categorical_crossentropy")
         return M
     
+    def actor_train(self):
+        action_gdts = K.placeholder(shape=(None, self.actions))
+        params_grad = tf.gradients(self.actor_unperturbed.output, self.actor_unperturbed.trainable_weights, -action_gdts)
+        grads = zip(params_grad, self.actor_unperturbed.trainable_weights)
+        return K.function([self.actor_unperturbed.input, action_gdts], [tf.train.AdamOptimizer(self.learning_rate).apply_gradients(grads)][1:])#[1:])
+    
+#    def calc_action(self, state):
+#        ### source: flyyufelix ###
+#        z = self.actor_perturbed.predict(state)
+#        z_concat = np.vstack(z)
+#        q = np.sum(np.multiply(z_concat, np.array(self.z)), axis=1) 
+#        action_idx = np.argmax(q)        
+#        return action_idx
+#    
+#    def calc_unperturbed_action(self, state):
+#        ### source: flyyufelix ###
+#        z = self.actor_unperturbed.predict(state)
+#        z_concat = np.vstack(z)
+#        q = np.sum(np.multiply(z_concat, np.array(self.z)), axis=1) 
+#        action_idx = np.argmax(q)       
+#        return action_idx    
+    
+#    def train2(self, batch):
+#        states = np.stack(batch[:,0])
+#        actions = np.stack(batch[:,1])
+#        rewards = np.stack(batch[:,2])
+#        m_prob = [np.zeros((batch.shape[0], self.atoms)) for i in range(self.actions)]
+#        for i, reward in enumerate(rewards):
+#            for j in range(self.actions):
+#                Tz = min(self.r_max, max(self.r_min, reward))
+#                bj = (Tz - self.r_min) / self.delta_r 
+#                m_l, m_u = math.floor(bj), math.ceil(bj)
+#                m_prob[j][i][int(m_l)] += (m_u - bj)
+#                m_prob[j][i][int(m_u)] += (bj - m_l)
+#        self.critic.fit([states, actions], m_prob, verbose = 0)
+#        grads = self.action_grads([states, actions])
+#        self.actor_optimizer([states, np.array(grads).reshape((-1, self.actions))])
+#        weights = self.actor_unperturbed.get_weights()
+#        self.actor_perturbed.set_weights(weights)
+#        self.update_std(np.array(states))  
+        
+#    def train(self, batch):
+#        states = np.stack(batch[:,0])
+#        actions = np.stack(batch[:,1])
+#        rewards = np.stack(batch[:,2])
+#        m_prob = np.zeros((batch.shape[0], self.atoms))
+#        for i, reward in enumerate(rewards):
+#            Tz = min(self.r_max, max(self.r_min, reward))
+#            bj = (Tz - self.r_min) / self.delta_r 
+#            m_l, m_u = math.floor(bj), math.ceil(bj)
+#            m_prob[i][int(m_l)] += (m_u - bj)
+#            m_prob[i][int(m_u)] += (bj - m_l)
+#        act = self.actor_unperturbed.predict(states)
+#        hist = self.critic.fit([states, actions], m_prob, verbose = 0)
+#        self.loss.append(hist.history["loss"])
+#        grads = self.action_grads([states, act])
+#        assert any(np.isnan(grads[0][0])) == False
+#        self.actor_optimizer([states, np.expand_dims(grads, axis = 0)])#.reshape((-1, self.actions))])
+#        weights = self.actor_unperturbed.get_weights()
+#        self.actor_perturbed.set_weights(weights)
+#        self.update_std(np.array(states))  
+
     def train(self, batch):
         states = np.stack(batch[:,0])
         actions = np.stack(batch[:,1])
         rewards = np.stack(batch[:,2])
-        hist = self.critic.fit([states, actions], rewards, verbose = 0)
+        m_prob = np.zeros((batch.shape[0], self.atoms))
+        for i, reward in enumerate(rewards):
+            Tz = min(self.r_max, max(self.r_min, reward))
+            bj = (Tz - self.r_min) / self.delta_r 
+            m_l, m_u = math.floor(bj), math.ceil(bj)
+            m_prob[i][int(m_l)] += (m_u - bj)
+            m_prob[i][int(m_u)] += (bj - m_l)
+        hist = self.critic.fit([states, actions], m_prob, verbose = 0)
         self.loss.append(hist.history["loss"])           
         new_actions = self.actor_unperturbed.predict(states)
         grads = self.calculate_gradients([states, new_actions])
@@ -145,6 +219,12 @@ class crl():
         ap = self.actor_perturbed.predict(states)
         self.std_log = np.sqrt(np.mean(np.square(au - ap)))
         self.calc_adaptive_noise(self.std_log)
+        
+#    def calc_action_list(self, z):
+#        z_concat = np.vstack(z)
+#        q = np.sum(np.multiply(z_concat, np.array(self.z)), axis=1) 
+#        q = q.reshape((batch.shape[0], self.actions), order='F')
+#        return np.argmax(q, axis=1)
     
     def calc_adaptive_noise(self, std):
         if std > self.target_std: self.std /= 1.01
@@ -160,11 +240,11 @@ class crl():
 #            target_weights[i] = weight * self.tau + target_weights[i] * (1 - self.tau) 
 #        self.actor_target.set_weights(target_weights)
     
-#    def soft_update_critic_target(self):
-#        weights, target_weights = self.critic.get_weights(), self.critic_target.get_weights()        
-#        for i, weight in enumerate(weights):
-#            target_weights[i] = weight * self.tau + target_weights[i] * (1 - self.tau) 
-#        self.critic_target.set_weights(target_weights)
+    def soft_update_critic_target(self):
+        weights, target_weights = self.critic.get_weights(), self.critic_target.get_weights()        
+        for i, weight in enumerate(weights):
+            target_weights[i] = weight * self.tau + target_weights[i] * (1 - self.tau) 
+        self.critic_target.set_weights(target_weights)
         
     def epsilon_greedy(self, action):
         if np.random.random() < self.epsilon:
@@ -191,6 +271,7 @@ class crl():
             self.high_score = cum_r
             self.actor_unperturbed.save_weights(f"high_score_weights_{cum_r}.h5")
         pd.DataFrame(soc).plot()
+        pd.DataFrame(np.squeeze(self.critic_target.predict([np.expand_dims(state, axis = 0), np.expand_dims(action, axis = 0)]))).plot(kind = "bar")
         pd.DataFrame(self.loss).plot(title = "critic loss")
         plt.show()
         plt.close()
@@ -201,7 +282,7 @@ class crl():
 if __name__ == "__main__":
     agent = crl() 
     
-    #DEBUG FUNCTION
+    #DEBUG FUNCTIONS
     self = agent    
     
     agent.load_weights(WEIGHTS_PATH)
@@ -222,7 +303,7 @@ if __name__ == "__main__":
             batch = np.array(random.sample(agent.memory, min(BATCH_SIZE, len(agent.memory))))    
             agent.train(batch)
 #            agent.soft_update_actor_target()
-#            agent.soft_update_critic_target()
+            agent.soft_update_critic_target()
         tqdm.write(f"\n--------------------------\n Episode: {ep+1}/{EPISODES} \n Epsilon: {np.round(agent.epsilon, 2)} \n Cumulative Reward: {cumul_r} \n Episodic Reward: {ep_r}\n Current Std: {agent.std}")
         if not (ep+1) % PRINT_EVERY_X_ITER:
             agent.plot_test()

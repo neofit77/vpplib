@@ -178,11 +178,11 @@ class ems(gym.Env):
         if charge_size_1 < 0 and charge_size_2 < 0: r, is_valid_action = 0, True
         #Action 1: Laden
         elif self.residual < 0 and charge_size_1 > 0 and charge_size_2 < 0:
-            r = charge_size_1
+            r = charge_size_1*3
             is_valid_action = self.el_storage.charge(charge_size_1, 15, self.time)
         #Action 2: Entladen
         elif self.residual > 0 and charge_size_2 > 0 and charge_size_1 < 0:
-            r = charge_size_2
+            r = charge_size_2*3
             is_valid_action = self.el_storage.discharge(charge_size_2, 15, self.time)
 
         

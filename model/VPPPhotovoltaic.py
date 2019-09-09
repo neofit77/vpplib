@@ -96,7 +96,7 @@ class VPPPhotovoltaic(VPPComponent):
         timeseries.rename(columns = {0:self.identifier}, inplace=True)
         timeseries.set_index(timeseries.index, inplace=True)
         
-        self.timeseries = timeseries.replace(0, np.NaN)
+        self.timeseries = timeseries.fillna(0)
         
         return timeseries
 
