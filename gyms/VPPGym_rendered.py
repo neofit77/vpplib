@@ -14,6 +14,8 @@ from collections import deque
 from model.VPPPhotovoltaic import VPPPhotovoltaic
 from model.VPPEnergyStorage import VPPEnergyStorage
 from model.VPPHousehold import VPPHousehold
+import pyglet
+from gym.envs.classic_control import rendering
 
 class ems(gym.Env):
                
@@ -68,10 +70,11 @@ class ems(gym.Env):
         self.log = deque(maxlen=self.EP_LEN)
         self.pv = self.prepareTimeSeriesPV()
         self.loadprofile = VPPHousehold(15, None, None)
+        self.loadprofile.data *= 0.5
         self.day_ind = self.day_sin()
         self.max_lp = max(self.loadprofile.data)
         self.viewer = None
-        self.render_vars = np.zeros(self.obs)
+        self.render_vars = [np.zeros(self.obs),0]
         
     def prepareTimeSeriesPV(self):
         """
@@ -152,7 +155,7 @@ class ems(gym.Env):
         state = np.array(np.zeros(self.obs))
         self.time = self.rand_start
         self.residual = 0       
-        self.el_storage = VPPEnergyStorage(15, 15, 0.9, 0.9, 15, 1)
+        self.el_storage = VPPEnergyStorage(15, 35, 0.9, 0.9, 15, 1)
         self.el_storage.prepareTimeSeries()
         self.soc = []
         return state
@@ -178,18 +181,18 @@ class ems(gym.Env):
         #Action 1: Laden
         elif self.residual < 0 and charge_size > 0.05 :
             charge_reward = abs(charge_size)*3
-            is_valid_action = self.el_storage.charge(charge_size, 15, self.time)
+            is_valid_action = self.el_storage.charge(abs(self.residual)*abs(charge_size), 15, self.time)
         #Action 2: Entladen
         elif self.residual > 0 and charge_size < -0.05:
             charge_reward = abs(charge_size)*3
-            is_valid_action = self.el_storage.discharge(abs(charge_size), 15, self.time)        
+            is_valid_action = self.el_storage.discharge(abs(self.residual)*abs(charge_size), 15, self.time)        
         #Fehler- und Rewardüberprüfung
         if not is_valid_action: charge_reward = -1
         return charge_reward
     
     def get_control_reward(self, control_size):
         control_reward = abs(self.residual - control_size)
-        return -control_reward
+        return np.clip(-control_reward, -1, 0)
     
     def step(self, action):
     #Actions:
@@ -204,8 +207,8 @@ class ems(gym.Env):
         charge_reward = self.get_charge_reward(charge_size)
         control_reward = self.get_control_reward(control_size)
         #Bereite den nächsten state vor
-        lp = self.loadprofile.valueForTimestamp(self.time)
-        pv = self.pv.valueForTimestamp(self.time)*10
+        lp = self.loadprofile.valueForTimestamp(self.time) 
+        pv = self.pv.valueForTimestamp(self.time)*3
         self.residual = lp - pv
         if self.pv.valueForTimestamp(self.time) > self.max_pv: self.max_pv = self.pv.valueForTimestamp(self.time)
 
@@ -215,14 +218,14 @@ class ems(gym.Env):
         self.time += 1
         self.soc.append(self.el_storage.stateOfCharge)
         timer_done = self.time >= self.rand_start + self.EP_LEN
-        control_done = False#control_reward < -0.8 
+        control_done = False#control_reward < -0.2 
         reward = control_reward + charge_reward
         if control_done:
             reward = -3
         if any([timer_done, control_done]) == True:         
             done = True
             info = pd.DataFrame(self.soc)
-        self.render_vars = state
+        self.render_vars = [state, control_reward]
             
         return state, reward, done, info
     
@@ -231,36 +234,28 @@ class ems(gym.Env):
     def render(self, mode = "human", close = False):
         screen_width = 600
         screen_height = 400
-        label = pyglet.text.Label("yehaa", x = 120, y = 180)
-        if self.viewer is None:         
+        
+        if self.viewer == None:         
+            
             self.viewer = rendering.Viewer(screen_width, screen_height)
             
-            @self.viewer.window.event        
-            def on_flip(self):
-                label.draw()
-            
-        charge_state = rendering.FilledPolygon([(200,200), (200,200+50*self.render_vars[0]), (210,200+50*self.render_vars[0]), (210,200)])
+#        @self.viewer.window.event        
+#        def on_flip(self):
+#            label.draw()
+#        
+#        label = pyglet.text.Label("yehaa", x = 120, y = 180)
+        charge_state = rendering.FilledPolygon([(200,200), (200,200+50*self.render_vars[0][0]), (210,200+50*self.render_vars[0][0]), (210,200)])
         self.viewer.add_onetime(charge_state)
         
-        residual_state = rendering.FilledPolygon([(150,200), (150,200+50*self.render_vars[1]), (160,200+50*self.render_vars[1]), (160,200)])
+        residual_state = rendering.FilledPolygon([(150,200), (150,200+50*self.render_vars[0][1]), (160,200+50*self.render_vars[0][1]), (160,200)])
         self.viewer.add_onetime(residual_state)  
-        label.draw()
+
+        control_state = rendering.FilledPolygon([(250,200), (250,200+50*self.render_vars[1]), (260,200+50*self.render_vars[1]), (260,200)])
+        self.viewer.add_onetime(control_state) 
+
         return self.viewer.render(return_rgb_array = mode=='rgb_array')
     
     def close(self):
         if self.viewer:
             self.viewer.close()
-            self.viewer = None
-
-if __name__ == "__main__":
-    from tqdm import tqdm
-    from gym.envs.classic_control import rendering
-    import pyglet
-    env = ems(96)
-    for ep in tqdm(range(1)):
-        env.reset()
-        for i in range(1):
-            #tqdm.write(f"{i}")
-            env.render()
-            env.step(np.random.random(2)*2-1)
-        
+            self.viewer = None        

@@ -7,7 +7,7 @@ Created on Thu Sep  5 17:43:44 2019
 import random
 import math
 import gym
-import VPPGym_continuous as ems_env
+import gyms.VPPGym_rendered as ems_env
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -20,10 +20,10 @@ from keras.layers import Input, Dense, GaussianNoise, concatenate
 from keras_layer_normalization import LayerNormalization
 from keras.optimizers import SGD, Adam
 
-PRINT_EVERY_X_ITER = 1
+PRINT_EVERY_X_ITER = 5
 EPISODES = 5000
-EP_LEN = 120
-BATCH_SIZE = 96
+EP_LEN = 480
+BATCH_SIZE = 480
 WEIGHTS_PATH = None
 
 """
@@ -38,12 +38,6 @@ will not be regarded as (m_u - bj) equals to zero as well!
 class crl():
     
     def __init__(self):        
-        #C51
-#        self.atoms = 51 
-#        self.r_max = 5
-#        self.r_min = -1.5
-#        self.delta_r = (self.r_max - self.r_min) / float(self.atoms - 1)
-#        self.z = [self.r_min + i * self.delta_r for i in range(self.atoms)]
         self.epsilon = 0.5
         self.epsilon_decay_rate = 0.999
         self.epsilon_min = 0.00
@@ -55,7 +49,7 @@ class crl():
         self.actions = 2
         
         #network variables
-        self.nodes = 12
+        self.nodes = 24
         self.layers = 2
         self.learning_rate = 0.01
         self.tau = 0.01
@@ -81,7 +75,17 @@ class crl():
                                     -self.action_gradients)
         self.gradients = zip(self.parameter_gradients, self.actor_unperturbed.trainable_weights)
         self.optimize = K.function([self.actor_unperturbed.input, self.action_gradients], outputs = [], updates = [tf.train.AdamOptimizer(self.learning_rate).apply_gradients(self.gradients)])
+    
+    def _huber_loss(self, y_true, y_pred, clip_delta=1.0):
+        ### source: keon.io ###
+        error = y_true - y_pred
+        cond  = K.abs(error) <= clip_delta
+
+        squared_loss = 0.5 * K.square(error)
+        quadratic_loss = 0.5 * K.square(clip_delta) + clip_delta * (K.abs(error) - clip_delta)
         
+        return K.mean(tf.where(cond, squared_loss, quadratic_loss))
+    
     def load_weights(self, name):
         if name == None: return print("No weights loaded")
         try: self.actor_target.load_weights(name)
@@ -101,7 +105,7 @@ class crl():
             x = LayerNormalization()(x)
         out = Dense(1, activation = 'linear')(x)
         M = Model([state, action], out)
-        M.compile(optimizer = Adam(self.learning_rate), loss = "MSE")
+        M.compile(optimizer = Adam(self.learning_rate), loss = self._huber_loss)
         return M
 
 ###! implement with training bool as K.variable!            
@@ -139,15 +143,11 @@ class crl():
         target_actions = self.actor_target.predict(next_states)
         #targets = np.expand_dims(np.zeros(batch.shape[0]), axis = 1)
         targets = self.critic.predict([states, actions])
-        t = self.critic_target.predict([next_states, target_actions])
-        
-        
-        
+        t = self.critic_target.predict([next_states, target_actions])    
         if any(dones): targets[dones] = np.expand_dims(rewards[dones], axis = 1)
         targets[~dones] = np.expand_dims(rewards[~dones] + self.gamma * np.amax(t[~dones]), axis = 1)
         hist = self.critic.fit([states, actions], targets, verbose = 0)
         grad_actions = self.actor_unperturbed.predict(states)
-
         self.loss.append(hist.history["loss"])           
         grads = self.calculate_gradients([states, grad_actions])
         assert any(np.isnan(grads[0][0])) == False
@@ -220,8 +220,7 @@ class crl():
         test_env.time = 20000
         log, soc = [], []
         cum_r = 0
-        for i in range(960):
-            
+        for i in range(960):          
             action = agent.actor_perturbed.predict(np.expand_dims(state, axis = 0))[0]
             state, r, done, _ = test_env.step(action) 
             log.append([action, state[0], state[1], state[2], r])
@@ -238,26 +237,25 @@ class crl():
         if LOGFILE:
             xls = pd.DataFrame(log)
             xls.to_excel("results_log_ddpg.xls")
-
+    
 if __name__ == "__main__":
     agent = crl() 
     
     #DEBUG FUNCTION
     self = agent    
+    
     env = ems_env.ems(EP_LEN) 
     agent.load_weights(WEIGHTS_PATH)
-#    env = gym.make("MountainCarContinuous-v0")
-#    env = gym.make("Pendulum-v0")
     cumul_r = 0
     for ep in tqdm(range(EPISODES)):
         done = False
         ep_r = 0
         state = env.reset()
         while not done:
-#            env.render()
+            env.render()
             prior_state = state      
             action = agent.epsilon_greedy(
-                    agent.actor_perturbed.predict(np.expand_dims(state, axis = 0))[0])#agent.epsilon_greedy(agent.calc_action(np.expand_dims(state, axis = 0)))
+                    agent.actor_perturbed.predict(np.expand_dims(state, axis = 0))[0])
             state, reward, done, _ = env.step(action)        
             cumul_r += reward
             ep_r += reward

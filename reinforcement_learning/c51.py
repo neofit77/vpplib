@@ -19,7 +19,7 @@ from keras.layers import Input, Dense, GaussianNoise
 from keras_layer_normalization import LayerNormalization
 from keras.optimizers import SGD
 
-PRINT_EVERY_X_ITER = 5
+PRINT_EVERY_X_ITER = 1
 EPISODES = 5000
 EP_LEN = 480
 BATCH_SIZE = 480
@@ -40,13 +40,14 @@ class crl():
         #C51
         self.atoms = 51 
         self.r_max = 2
-        self.r_min = -1.5
-        self.delta_r = (self.r_max - self.r_min) / float(self.atoms - 1)
-        self.z = [self.r_min + i * self.delta_r for i in range(self.atoms)]
+        self.r_min = -1
+        self.delta_z = (self.r_max - self.r_min) / float(self.atoms - 1)
+        self.z = [self.r_min + i * self.delta_z for i in range(self.atoms)]
         self.epsilon = 0.5
         self.epsilon_decay_rate = 0.9995
         self.epsilon_min = 0.00
-        
+        self.gamma = 0.99
+
         #environment variables
         self.state_size = 3
         self.state_dim = (self.state_size,)
@@ -123,17 +124,92 @@ class crl():
         action_idx = np.argmax(q)       
         return action_idx    
     
+    def train_old(self, batch):
+        states = np.stack(batch[:,0])
+        actions = np.stack(batch[:,1])
+        rewards = np.stack(batch[:,2])
+        m_prob = np.zeros((self.actions, batch.shape[0], self.atoms))
+        Tz = np.clip(rewards, self.r_min, self.r_max)
+        bj = (Tz - self.r_min) / self.delta_z 
+        m_l, m_u = np.floor(bj).astype("int32"), np.ceil(bj).astype("int32")
+#        index = np.arange(0, batch.shape[0]).astype("int32")
+        where_equal = np.equal(m_l, m_u)
+        if any(where_equal):
+            m_prob[actions, :, m_l[where_equal]] = 1
+            m_prob[actions, :, m_u[where_equal]] = 1
+        if not any(where_equal):
+            m_prob[actions, :, m_l[~where_equal]] = m_u - bj 
+            m_prob[actions, :, m_u[~where_equal]] = bj - m_l
+        m_prob = [m_prob[0], m_prob[1], m_prob[2]]
+        self.actor_unperturbed.fit(states, m_prob, verbose = 0)
+        weights = self.actor_unperturbed.get_weights()
+        self.actor_perturbed.set_weights(weights)
+        self.update_std(np.array(states))  
+        
     def train(self, batch):
         states = np.stack(batch[:,0])
         actions = np.stack(batch[:,1])
         rewards = np.stack(batch[:,2])
-        m_prob = [np.zeros((batch.shape[0], self.atoms)) for i in range(self.actions)]
-        for i, (action, reward) in enumerate(zip(actions, rewards)):
-            Tz = min(self.r_max, max(self.r_min, reward))
-            bj = (Tz - self.r_min) / self.delta_r 
-            m_l, m_u = math.floor(bj), math.ceil(bj)
-            m_prob[action][i][int(m_l)] += (m_u - bj)
-            m_prob[action][i][int(m_u)] += (bj - m_l)
+        next_states = np.stack(batch[:,3])
+        dones = np.stack(batch[:,4]).astype("bool")
+
+        z = self.actor_unperturbed.predict(states) # Return a list [32x51, 32x51, 32x51]
+        z_ = np.array(self.actor_target.predict(next_states)) # Return a list [32x51, 32x51, 32x51]
+        z_concat = np.vstack(z)
+        q = np.sum(np.multiply(z_concat, np.array(self.z)), axis=1) # length (num_atoms x num_actions)
+        q = q.reshape((batch.shape[0], self.actions), order='F')
+        optimal_action_idxs = np.argmax(q, axis=1)
+        m_prob = np.zeros((self.actions, batch.shape[0], self.atoms))       
+        index = np.arange(0, batch.shape[0]).astype("int32")
+        if any(dones):
+            Tz = np.clip(rewards, self.r_min, self.r_max)
+            bj = (Tz - self.r_min) / self.delta_z 
+            m_l, m_u = np.floor(bj).astype("int32"), np.ceil(bj).astype("int32")
+            where_equal = np.equal(m_l, m_u)           
+            if any(where_equal):
+                m_prob[actions[where_equal], index[where_equal], m_l[where_equal]][dones[where_equal]] = 1
+            if any(~where_equal):
+                m_prob[actions[~where_equal], index[~where_equal], m_l[~where_equal]][dones[~where_equal]] = (m_u - bj)[~where_equal][dones[~where_equal]]
+                m_prob[actions[~where_equal], index[~where_equal], m_u[~where_equal]][dones[~where_equal]] = (bj - m_l)[~where_equal][dones[~where_equal]]                 
+        
+        #!!! ab hier wirds messy ###
+        
+        Tz_discounted = np.clip(np.array([rewards[i] + np.array(self.z) * self.gamma for i in index]), self.r_min, self.r_max)
+        bj_discounted = (Tz_discounted - self.r_min) / self.delta_z       
+        m_l_discounted, m_u_discounted = np.floor(bj_discounted).astype("int32"), np.ceil(bj_discounted).astype("int32")
+        where_equal = np.equal(m_l_discounted, m_u_discounted)
+        ### discount distribution ###
+        m_prob[actions[~dones], index][where_equal[~dones]] = z_[optimal_action_idxs[~dones], index][where_equal[~dones]] 
+        
+        if any(where_equal.flatten()):
+            
+
+            m_prob[actions[~dones], index][where_equal[~dones]] = z_[optimal_action_idxs[~dones], index][where_equal[~dones]] 
+        if any(~where_equal.flatten()):
+            m_prob[actions, index[~where_equal], m_l[~where_equal]][~dones[~where_equal]] = z_[optimal_action_idxs[~where_equal], index[~where_equal]][~dones[~where_equal]] * np.array(m_u_discounted - bj_discounted)[~dones[~where_equal]] 
+            m_prob[actions[~where_equal], index[~where_equal], m_u[~where_equal]][~dones[~where_equal]] = z_[optimal_action_idxs[~where_equal], index[~where_equal]][~dones[~where_equal]] * np.array(bj_discounted - m_l_discounted)[~dones[~where_equal]]
+        m_prob = [m_prob[0], m_prob[1], m_prob[2]]
+        self.actor_unperturbed.fit(states, m_prob, verbose = 0)
+        weights = self.actor_unperturbed.get_weights()
+        self.actor_perturbed.set_weights(weights)
+        self.update_std(np.array(states))  
+        
+#        for i in range(batch.shape[0]):
+#            if dones[i]: # Terminal State
+#                # Distribution collapses to a single point
+#                Tz = min(self.v_max, max(self.v_min, reward[i]))
+#                bj = (Tz - self.v_min) / self.delta_z 
+#                m_l, m_u = math.floor(bj), math.ceil(bj)
+#                m_prob[action[i]][i][int(m_l)] += (m_u - bj)
+#                m_prob[action[i]][i][int(m_u)] += (bj - m_l)
+#            else:
+#                for j in range(self.atoms):
+#                    Tz = min(self.v_max, max(self.v_min, reward[i] + self.gamma * self.z[j]))
+#                    bj = (Tz - self.v_min) / self.delta_z 
+#                    m_l, m_u = math.floor(bj), math.ceil(bj)
+#                    m_prob[action[i]][i][int(m_l)] += z_[optimal_action_idxs[i]][i][j] * (m_u - bj)
+#                    m_prob[action[i]][i][int(m_u)] += z_[optimal_action_idxs[i]][i][j] * (bj - m_l)
+        m_prob = [m_prob[0], m_prob[1], m_prob[2]]
         self.actor_unperturbed.fit(states, m_prob, verbose = 0)
         weights = self.actor_unperturbed.get_weights()
         self.actor_perturbed.set_weights(weights)
@@ -212,7 +288,7 @@ if __name__ == "__main__":
             state, r, done, _ = env.step(action)        
             cumul_r += r
             ep_r += r
-            actor.memory.append([prior_state, action, r]) 
+            actor.memory.append([prior_state, action, r, state, done]) 
             batch = np.array(random.sample(actor.memory, min(BATCH_SIZE, len(actor.memory))))    
             actor.train(batch)
             actor.soft_update_actor_target()

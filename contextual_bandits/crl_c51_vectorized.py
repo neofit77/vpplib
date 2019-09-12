@@ -19,7 +19,7 @@ from keras.layers import Input, Dense, GaussianNoise
 from keras_layer_normalization import LayerNormalization
 from keras.optimizers import SGD
 
-PRINT_EVERY_X_ITER = 5
+PRINT_EVERY_X_ITER = 1
 EPISODES = 5000
 EP_LEN = 480
 BATCH_SIZE = 480
@@ -40,7 +40,7 @@ class crl():
         #C51
         self.atoms = 51 
         self.r_max = 2
-        self.r_min = -1.5
+        self.r_min = -1
         self.delta_r = (self.r_max - self.r_min) / float(self.atoms - 1)
         self.z = [self.r_min + i * self.delta_r for i in range(self.atoms)]
         self.epsilon = 0.5
@@ -132,10 +132,14 @@ class crl():
         bj = (Tz - self.r_min) / self.delta_r 
         m_l, m_u = np.floor(bj).astype("int32"), np.ceil(bj).astype("int32")
         index = np.arange(0, batch.shape[0]).astype("int32")
-        m_prob[actions, index, m_l] = m_u - bj 
-        m_prob[actions, index, m_u] = bj - m_l
+        where_equal = np.equal(m_l, m_u)
+        if any(where_equal):
+            m_prob[actions[where_equal], index[where_equal], m_l[where_equal]] = 1
+        if any(~where_equal):
+            m_prob[actions[~where_equal], index[~where_equal], m_l[~where_equal]] = (m_u - bj)[~where_equal] 
+            m_prob[actions[~where_equal], index[~where_equal], m_u[~where_equal]] = (bj - m_l)[~where_equal]
         m_prob = [m_prob[0], m_prob[1], m_prob[2]]
-        self.actor_unperturbed.fit(states, m_prob, verbose = 0)
+        self.actor_unperturbed.train_on_batch(states, m_prob)
         weights = self.actor_unperturbed.get_weights()
         self.actor_perturbed.set_weights(weights)
         self.update_std(np.array(states))  
