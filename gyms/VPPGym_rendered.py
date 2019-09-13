@@ -16,6 +16,9 @@ from model.VPPEnergyStorage import VPPEnergyStorage
 from model.VPPHousehold import VPPHousehold
 import pyglet
 from gym.envs.classic_control import rendering
+import utils.rendering_sprites as img
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from matplotlib.figure import Figure
 
 class ems(gym.Env):
                
@@ -75,6 +78,7 @@ class ems(gym.Env):
         self.max_lp = max(self.loadprofile.data)
         self.viewer = None
         self.render_vars = [np.zeros(self.obs),0]
+        self.plot = np.zeros(5)
         
     def prepareTimeSeriesPV(self):
         """
@@ -229,7 +233,15 @@ class ems(gym.Env):
             
         return state, reward, done, info
     
-
+    def create_plot(self):
+        fig = Figure()
+        canvas = FigureCanvas(fig)
+        ax = fig.gca()        
+        ax.text(0.0,0.0,"Test", fontsize=45)
+        ax.axis('off')        
+        canvas.draw()       # draw the canvas, cache the renderer       
+        image = np.fromstring(canvas.tostring_rgb(), dtype='uint8')*255
+        return image
         
     def render(self, mode = "human", close = False):
         screen_width = 600
@@ -238,7 +250,37 @@ class ems(gym.Env):
         if self.viewer == None:         
             
             self.viewer = rendering.Viewer(screen_width, screen_height)
+            charge_state_border = rendering.make_polyline([(200,200), (200,250), (210,250), (210,200)])
+            self.viewer.add_geom(charge_state_border)
             
+            residual_state_border = rendering.make_polyline([(150,150), (150,250), (160,250), (160,150), (150,150)])
+            self.viewer.add_geom(residual_state_border)  
+    
+            control_state_border = rendering.make_polyline([(250,150), (250,200), (260,200), (260,150), (250,150)])
+            self.viewer.add_geom(control_state_border) 
+            
+            battery_icon = rendering.Image("./utils/rendering_sprites/battery.png", 30, 30)
+            battery_icon.add_attr(rendering.Transform(translation=(205,275)))
+
+            demand_icon = rendering.Image("./utils/rendering_sprites/demand.png", 30, 30)
+            demand_icon.add_attr(rendering.Transform(translation=(155,275)))
+
+            pv_icon = rendering.Image("./utils/rendering_sprites/pv.png", 30, 30)
+            pv_icon.add_attr(rendering.Transform(translation=(155, 125)))
+        
+            control_icon = rendering.Image("./utils/rendering_sprites/control.png", 30, 30)
+            control_icon.add_attr(rendering.Transform(translation=(255,275)))
+            
+#            plot_icon = rendering.Image("./utils/rendering_sprites/control.png", 200, 200)
+#            plot_icon.img = pyglet.image.ImageData(100, 100, "L", self.create_plot().data.__str__())
+#            plot_icon.add_attr(rendering.Transform(translation=(100,100)))
+
+            #battery_icon.Transform()
+            self.viewer.add_geom(battery_icon)
+            self.viewer.add_geom(demand_icon)
+            self.viewer.add_geom(pv_icon)
+            self.viewer.add_geom(control_icon)
+#            self.viewer.add_geom(plot_icon)
 #        @self.viewer.window.event        
 #        def on_flip(self):
 #            label.draw()
